@@ -32,7 +32,7 @@ python script.py analyze . --prompt "Identify security vulnerabilities." # '.' i
 ## API Configuration
 The tool communicates with DeepSeek-R1 API via:
 ```
-DEEPSEEK_API_URL = "http://127.0.0.1:11434/api/generate"
+OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
 ```
 Ensure the API is running before execution.
 

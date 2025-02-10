@@ -280,7 +280,7 @@ def main():
     args = parser.parse_args()
 
     if not check_api_availability():
-        print("DeepSeek API is unavailable. Exiting.")
+        print("API is unavailable. Exiting.")
         return
 
     check_ollama_and_setup()
