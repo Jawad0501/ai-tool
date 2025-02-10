@@ -209,6 +209,8 @@ def determine_relevant_files(directory_structure, framework_info, user_request):
 
     Based on the user request: "{user_request}", determine which files are most relevant for analysis.
 
+    If needed according to the user request: "{user_request}", take all files as relevant file.
+
     Return a list of relevant file paths strictly following the JSON format:
     ['filePath1', 'filePath2']
 
