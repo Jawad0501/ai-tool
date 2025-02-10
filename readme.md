@@ -6,7 +6,7 @@ This is a Python-based AI-powered project analysis tool using DeepSeek-R1. It id
 - Identifies frameworks used in a project based on directory structure.
 - Determines relevant files for analysis based on user queries.
 - Reads and processes selected files for AI-assisted analysis.
-- Uses DeepSeek-R1 API for AI-powered insights.
+- Uses Codegemma API for AI-powered insights.
 
 ## Requirements
 - Python 3.7+
