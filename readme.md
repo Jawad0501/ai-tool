@@ -26,7 +26,7 @@ python script.py analyze <project_path> --prompt "Your analysis request"
 
 ### Example:
 ```sh
-python script.py analyze /path/to/project --prompt "Identify security vulnerabilities."
+python script.py analyze . --prompt "Identify security vulnerabilities." # '.' is necessary for determining the root directory
 ```
 
 ## API Configuration
