@@ -1,6 +1,6 @@
 # AI-Powered Project Analyzer
 
-This is a Python-based AI-powered project analysis tool using DeepSeek-R1. It identifies frameworks, determines relevant files, and analyzes them based on user requests.
+This is a Python-based AI-powered project analysis tool using Codegemma. It identifies frameworks, determines relevant files, and analyzes them based on user requests.
 
 ## Features
 - Identifies frameworks used in a project based on directory structure.
