@@ -11,6 +11,7 @@ This is a Python-based AI-powered project analysis tool using Codegemma. It iden
 ## Requirements
 - Python 3.7+
 - `requests` module
+- Ollama 
 
 ## Installation
 Clone the repository and install dependencies:

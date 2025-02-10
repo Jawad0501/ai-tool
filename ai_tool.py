@@ -1,304 +1,264 @@
-import argparse
-import requests
 import os
 import json
-import re
-import shutil
+import argparse
 import subprocess
+import requests
+import shutil
+import re
+from difflib import get_close_matches  # For fuzzy matching
 
-OLLAMA_INSTALL_URL = "https://ollama.com/download"
-OLLAMA_INSTALL_CMD = "curl -fsSL https://ollama.com/install.sh | sh"  # For Linux/macOS
+# Constants
 OLLAMA_MODEL_NAME = "codegemma"
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_API = "http://localhost:11434"
 EXCLUDED_FOLDERS = ["vendor", "node_modules", ".git"]
 
+# Session Memory with Indexing
+class CodeIndex:
+    def __init__(self):
+        self.index = {}  # { "function_name": "file_path" }
+        self.file_snippets = {}  # { "file_path": ["function definitions", ...] }
 
-# OLLAMA INSTALLATION
-def is_ollama_installed():
-    """Check if Ollama is installed by looking for the executable."""
-    return shutil.which("ollama") is not None
+    def add(self, file_path, function_name, snippet):
+        """Add function/class to index"""
+        print(f"✅ Indexing {function_name} from {file_path}")  # Debugging
+        self.index[function_name.lower()] = file_path
+        if file_path not in self.file_snippets:
+            self.file_snippets[file_path] = []
+        self.file_snippets[file_path].append(snippet)
 
-def is_model_installed(model_name):
-    """Check if a specific model is installed in Ollama."""
-    try:
-        result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
-        return model_name in result.stdout
-    except FileNotFoundError:
-        return False
+    def search(self, query):
+        """Find relevant files based on query using substring matching"""
+        query = query.lower()
+        matches = {}
 
-def prompt_installation():
-    """Prompt the user for installation of Ollama and the model."""
-    print("\n🚨 Ollama or the required model is missing! 🚨")
-    print("👉 Ollama (AI model runner) is required to run this script.")
-    print(f"👉 The '{OLLAMA_MODEL_NAME}' model is also required for analysis.")
-    print("\n📦 Estimated Disk Space:")
-    print("   - Ollama: ~500MB")
-    print("   - codegemma model: ~5GB")
-    
-    choice = input("\nDo you want to install them now? (y/n): ").strip().lower()
-    
-    if choice == 'y':
-        install_ollama()
-        install_model(OLLAMA_MODEL_NAME)
-    else:
-        print("\n❌ Installation aborted. Exiting...")
-        exit()
+        # Use substring matching for case-insensitive search
+        for fn, file_path in self.index.items():
+            if query in fn:  # Check if query string is a substring of function name
+                matches[fn] = file_path
 
-def install_ollama():
-    """Install Ollama based on the user's OS."""
-    print("\n🚀 Installing Ollama...")
+        return matches
 
-    if os.name == 'posix':  # macOS/Linux
-        subprocess.run(OLLAMA_INSTALL_CMD, shell=True, check=True)
-    elif os.name == 'nt':  # Windows
-        print(f"\n🔗 Please download and install Ollama manually: {OLLAMA_INSTALL_URL}")
-        input("Press Enter after installation to continue...")
-    else:
-        print("❌ Unsupported OS. Please install Ollama manually.")
-        exit()
+    def search_fuzzy(self, query):
+        """Find the closest matches using fuzzy matching"""
+        query = query.lower()
+        all_functions = list(self.index.keys())
+        closest_matches = get_close_matches(query, all_functions, n=3, cutoff=0.6)
+        matches = {fn: self.index[fn] for fn in closest_matches}
+        return matches
 
-def install_model(model_name):
-    """Install a specific model in Ollama."""
-    print(f"\n🚀 Downloading model '{model_name}' (this may take a while)...")
-    subprocess.run(["ollama", "pull", model_name], check=True)
+    def get_snippets(self, file_path):
+        """Get relevant code snippets"""
+        return self.file_snippets.get(file_path, [])
 
+# Ollama Check
 def check_ollama_and_setup():
-    """Ensure Ollama and the required model are installed before proceeding."""
-    if not is_ollama_installed():
-        prompt_installation()
+    if shutil.which("ollama") is None:
+        print("\n❌ Ollama is not installed. Please install it manually.")
+        exit()
+    subprocess.run(["ollama", "pull", OLLAMA_MODEL_NAME], check=True)
+    print("\n✅ Ollama and model are ready.")
 
-    if not is_model_installed(OLLAMA_MODEL_NAME):
-        install_model(OLLAMA_MODEL_NAME)
-
-    print("\n✅ All requirements are installed. Starting workflow...")
-
-
-def check_api_availability():
-    try:
-        response = requests.get(OLLAMA_API)
-        return response.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
-
+# AI Interaction
 def generate_text(prompt):
+    """Call Ollama AI for text generation"""
     try:
         response = requests.post(OLLAMA_API_URL, json={"model": OLLAMA_MODEL_NAME, "prompt": prompt, "stream": False})
         response.raise_for_status()
         return response.json().get("response", "No response received")
     except requests.exceptions.RequestException as e:
-        return f"Error during API request: {str(e)}"
+        return f"Error: {str(e)}"
 
-# def map_directory_structure(dir_path):
-#     structure = {}
-#     for root, dirs, files in os.walk(dir_path):
-#         dirs[:] = [d for d in dirs if d not in EXCLUDED_FOLDERS]
-#         relative_path = os.path.relpath(root, dir_path)
-#         structure[relative_path if relative_path != "." else ""] = {"dirs": dirs, "files": files}
-#         # print(structure)
-#     return structure
+def index_codebase(directory):
+    index = CodeIndex()
 
-def map_directory_structure(dir_path):
-    def get_directory_tree(path):
-        # List to store subdirectory and file information
-        result = {}
-        
-        # Walk through the directory
-        for item in os.listdir(path):
-            item_path = os.path.join(path, item)
-            if os.path.isdir(item_path):
-                # Exclude directories as specified
-                if item not in EXCLUDED_FOLDERS:
-                    result[item] = get_directory_tree(item_path)  # Recursively get subdirectory tree
-            elif os.path.isfile(item_path):
-                result[item] = None  # Files will be stored with a None value (indicating it's a file)
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if d not in EXCLUDED_FOLDERS]
 
-        return result
+        for file in files:
+            file_path = os.path.join(root, file)
 
-    # Start building the tree from the root directory
-    return {os.path.basename(dir_path): get_directory_tree(dir_path)}
+            print(f"🔍 Processing file: {file_path}")
 
-def map_root_directory_structure(dir_path):
-    structure = []
+            if not is_text_file(file_path):
+                print(f"⚠️ Skipping non-text file: {file_path}")
+                continue
 
-    # List the immediate directories and files in the root folder
-    for item in os.listdir(dir_path):
-        item_path = os.path.join(dir_path, item)
-        if os.path.isdir(item_path):
-            if item not in EXCLUDED_FOLDERS:
-                structure.append(item)
-        elif os.path.isfile(item_path):
-            structure.append(item)
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
 
-    # Print the structure for debugging (optional)
-    # print(structure)
-    return structure
+                    if not content.strip():
+                        print(f"⚠️ Skipping empty file: {file_path}")
+                        continue
 
-def identify_framework(directory_structure):
-    prompt = f"""
-    Given the following project directory structure:
-    {json.dumps(directory_structure, indent=4)}
+                    # **Check if the file contains a class definition**
+                    if "class " in content:  # Basic check for class-based files
+                        print(f"✅ Detected class file: {file_path}. Indexing full content.")
+                        index.add(file_path, os.path.basename(file_path), content)
+                        continue  # Skip function indexing since we added the full file
 
-    Identify the framework(s) used in this project and explain your reasoning. The project may use more than one framework, so return all identified frameworks.
+                    # Extract functions or methods
+                    functions = extract_functions(content)
+                    if functions:
+                        for func_name, snippet in functions:
+                            index.add(file_path, func_name, snippet)
+                    else:
+                        print(f"✅ No functions found in {file_path}. Indexing entire file.")
+                        index.add(file_path, file, content)  # Index the entire file content
 
-    Return the result strictly in the following JSON format:
-    [
-    "Framework1",
-    "Framework2"
-    ]
+            except FileNotFoundError:
+                print(f"⚠️ File not found: {file_path}. Skipping...")
+            except PermissionError:
+                print(f"⛔ Permission denied: {file_path}. Skipping...")
+            except Exception as e:
+                print(f"❌ Error reading {file_path}: {str(e)}")
 
-    Example Responses:
-    1. If the project uses Laravel and Vue:
-    [
-        "Laravel",
-        "Vue"
-    ]
-    2. If the project uses React and Vite:
-    [
-        "React",
-        "Vite"
-    ]
-    3. If the project only uses WordPress:
-    [
-        "WordPress"
-    ]
+    return index
 
 
-    Only return the JSON array and nothing else. I dont need the reasoning.
-    """
-    response = generate_text(prompt)
+
+def is_text_file(file_path, block_size=512):
+    """Detect if a file is a text file or binary."""
     try:
-        return {"framework" : json.loads(response)}
-    except json.JSONDecodeError:
-        return {"framework_detected": False, "framework": "Unknown", "reasoning": response}
-
-# def determine_relevant_files(directory_structure, framework_info, user_request):
-#     print(directory_structure);
-#     print(user_request);
-#     prompt = f"""
-#     Given the directory structure:
-#     {json.dumps(directory_structure, indent=2)}
-#     The project uses {framework_info['framework']}.
-#     Based on the user request: "{user_request}", determine which files are most relevant for analysis.
-#     Return a list of relevant file paths in JSON {'app/Http/Controllers/StaffController.php', 'composer.json'} format.
-#     """
-#     response = generate_text(prompt)
-#     print(response)
-
-#     try:
-#         return json.loads(response)
-#     except json.JSONDecodeError:
-#         return {"selected_files": [], "reasoning": response}
-
-# def read_selected_files(base_path, selected_files):
-#     file_contents = {}
-#     for file_path in selected_files:
-#         full_path = os.path.join(base_path, file_path)
-#         if os.path.exists(full_path):
-#             with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-#                 file_contents[file_path] = f.read()
-#     return file_contents
+        with open(file_path, "rb") as f:
+            chunk = f.read(block_size)
+        if b"\x00" in chunk:  # If it contains null bytes, it's binary
+            return False
+        return True
+    except Exception:
+        return False  # Treat unreadable files as binary
 
 
-def determine_relevant_files(directory_structure, framework_info, user_request):
+def extract_functions(content):
+    """Extract function and class names with their definitions from Laravel (PHP), Python, and JavaScript files."""
+    snippets = []
 
-    # Construct the prompt to pass to the AI
-    prompt = f"""
-    Given the directory structure:
-    {directory_structure}.
+    # PHP functions and methods (Laravel specific)
+    php_pattern = r"(?:(public|protected|private)?\s*function\s+(\w+)\s*\(.*\)\s*\{|\s*public\s*function\s+(\w+)\s*\(.*\)\s*\{)"
+    for match in re.findall(php_pattern, content):
+        # Check if it's a function match
+        if match[1]:
+            snippets.append((match[1], match[0]))  # match[1] = function name, match[0] = full snippet
+        elif match[2]:  # Laravel controller action
+            snippets.append((match[2], match[0]))  # match[2] = function name, match[0] = full snippet
 
-    Based on the user request: "{user_request}", determine which files are most relevant for analysis.
+    # Python Functions & Classes
+    python_pattern = r"(?:(def\s+(\w+)\s*\(.*\):\s*(?:\n\s{4,}.*)+)|(?:class\s+(\w+)\s*\(.*\):))"
+    for match in re.findall(python_pattern, content):
+        if match[1]:  # Python functions
+            snippets.append((match[1], match[0]))
+        elif match[2]:  # Python classes
+            snippets.append((match[2], match[0]))
 
-    If needed according to the user request: "{user_request}", take all files as relevant file.
+    # JavaScript Functions (named & class methods)
+    js_pattern = r"(?:(function\s+(\w+)\s*\(.*\)\s*\{)|(?:class\s+(\w+)\s*\{.*\}))"
+    for match in re.findall(js_pattern, content):
+        if match[1]:  # Named functions
+            snippets.append((match[1], match[0]))
+        elif match[2]:  # Class methods
+            snippets.append((match[2], match[0]))
 
-    Return a list of relevant file paths strictly following the JSON format:
-    ['filePath1', 'filePath2']
-
-    Example Responses:
-    1. If the relevant file paths are composer.json and vite.config.js:
-    [
-        "composer.json",
-        "vite.config.js"
-    ]
+    if not snippets:
+        print("⚠️ No functions or classes found in this file.")  # Debugging
+    return snippets
 
 
-
-    Only return the JSON array and nothing else. I dont need the reasoning or justification.    
-    """
+# Intelligent Query Processing
+def process_query(query, code_index):
+    """Find relevant code snippets and analyze only necessary parts"""
     
-    # Call to AI to generate a response
-    response = generate_text(prompt)
-    print(response)
+    # Search for direct matches (specific function or class)
+    matches = code_index.search(query)
 
-    file_paths = json.loads(response)
+    if not matches:
+        print("\n⚠️ No direct match found. Trying fuzzy matching...")
+        matches = code_index.search_fuzzy(query)
 
-    return {"file_paths" : file_paths}
+    if not matches:
+        print("\n⚠️ No close matches found. Providing full codebase context to AI...")
+        # If no matches are found, send full indexing and the query
+        full_index = generate_full_index(code_index)
+        prompt = f"Here is the full codebase index:\n\n{full_index}\n\nNow, address the following query:\n{query}"
+        return generate_text(prompt)
 
-    # Try to parse the response and return the relevant file paths
-    # try:
-    #     # Assuming the AI response is a list of file paths as a JSON array of strings
-    #     # file_paths = json.loads(response)
-    #     # print("File paths:", file_paths)
+    print(f"\n🔍 Found {len(matches)} relevant code snippets.")  # Debugging
 
-    #     print(json.loads(response))
+    # Collect all snippets in a list
+    all_snippets = []
+    for function_name, file_path in matches.items():
+        snippets = code_index.get_snippets(file_path)
         
-        
-    #     # Ensure the response is an array of strings (file paths)
-    #     # if isinstance(file_paths, list) and all(isinstance(item, str) for item in file_paths):
-    #     #     return file_paths
-    #     # else:
-    #     #     return {"selected_files": [], "reasoning": "Invalid format in AI response"}
-    # except json.JSONDecodeError:
-    #     # If the AI response can't be parsed, return the raw response for debugging
-    #     return {"file_paths": [], "reasoning": response}
+        # Add snippets to the list
+        all_snippets.extend(snippets)
+    
+    # Join all snippets into a single string, separated by newlines or other separators
+    snippets_text = "\n\n".join(all_snippets)
+    
+    # Construct the final prompt with all snippets
+    prompt = f"Here are the snippets from the codebase index:\n\n{snippets_text}\n\nNow, address the following query:\n{query}"
+    
+    # Send the full prompt to the AI
+    return generate_text(prompt)
 
-def read_selected_files(base_path, selected_files):
-    file_contents = {}
-    for file_path in selected_files:
-        full_path = os.path.join(base_path, file_path)
-        if os.path.exists(full_path):
-            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                file_contents[file_path] = f.read()
-    return file_contents
+    # return "\n".join(responses)
 
-def analyze_files_with_ai(file_contents, user_request):
-    prompt = f"""
-    The following files were selected for analysis:
-    {json.dumps(file_contents, indent=4)}
-    Perform the requested analysis: "{user_request}".
-    """
-    response = generate_text(prompt)
-    return response
-    # try:
-    #     return json.loads(response)
-    # except json.JSONDecodeError:
-    #     return {"issues": [], "raw_response": response}
+def generate_full_index(code_index):
+    """Generate a human-readable summary of the full codebase index"""
+    full_index = ""
+    for file_path, snippets in code_index.file_snippets.items():
+        if not snippets:
+            continue  # Skip files with no snippets
 
+        full_index += f"\n📂 File: {file_path}\n"
+        for snippet in snippets:
+            if len(snippet) == 2:  # Ensure that snippet is a tuple (function_name, snippet)
+                function_name, snippet_code = snippet
+                full_index += f"🔹 Function: {function_name}\n{snippet_code}\n"
+            # else:
+            #     # print(f"⚠️ Skipping invalid snippet format: {snippet}")
+    return full_index
+
+
+# Interactive Mode
+def interactive_mode(code_index):
+    """Allow users to query the codebase dynamically"""
+    while True:
+        try:
+            user_input = input("\n📝 Your Question: ")
+            if user_input.strip().lower() == "exit":
+                print("\n👋 Exiting interactive mode...")
+                break
+
+            # Fetch relevant functions
+            response = process_query(user_input, code_index)
+            print(response)
+
+        except KeyboardInterrupt:
+            print("\n\n👋 Session ended.")
+            break
+
+# Main Function
 def main():
-    parser = argparse.ArgumentParser(description="AI-powered project analysis using DeepSeek-R1.")
+    parser = argparse.ArgumentParser(description="AI-powered project analysis with instant code search.")
     parser.add_argument("action", choices=["analyze"], help="Action to perform")
     parser.add_argument("path", help="Project directory path")
-    parser.add_argument("--prompt", required=True, help="User request for analysis")
+    parser.add_argument("--prompt", help="Initial prompt/query for the AI", type=str)
+
     args = parser.parse_args()
-
-    if not check_api_availability():
-        print("API is unavailable. Exiting.")
-        return
-
     check_ollama_and_setup()
 
-    directory_structure = map_directory_structure(args.path)
-    root_directory_structure = map_root_directory_structure(args.path)
-    framework_info = identify_framework(directory_structure)
-    print(f"Detected Framework: {framework_info['framework']}")
-    
-    relevant_files = determine_relevant_files(directory_structure, framework_info, args.prompt)
-    print(f"Relevant Files: {relevant_files}")
+    print("\n🔍 Indexing project files...")
+    code_index = index_codebase(args.path)
+    print("\n✅ Indexing Complete. Ready for queries.")
 
-    file_contents = read_selected_files(args.path, relevant_files['file_paths'])
-    analysis_results = analyze_files_with_ai(file_contents, args.prompt)
-    
-    print("\n=== Analysis Results ===\n", json.dumps(analysis_results, indent=2))
+    if args.prompt:
+        print(f"\n📝 Query received: {args.prompt}")
+        response = process_query(args.prompt, code_index)
+        print(response)
+
+    # Always enter interactive mode after processing the prompt (if provided)
+    interactive_mode(code_index)
+
 
 if __name__ == "__main__":
     main()
