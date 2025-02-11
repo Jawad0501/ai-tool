@@ -1,2 +1,9 @@
 ai_tool_old.py
 scratch.py
+indexer.py
+main.py
+ollama_helper.py
+query_processor.py
+utils.py
+ai_tool.py
+aihelp.sh

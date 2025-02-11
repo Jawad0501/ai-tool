@@ -5,10 +5,11 @@ import subprocess
 import requests
 import shutil
 import re
+import platform
 from difflib import get_close_matches  # For fuzzy matching
 
 # Constants
-OLLAMA_MODEL_NAME = "codegemma"
+OLLAMA_MODEL_NAME = "qwen2.5-coder"
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 EXCLUDED_FOLDERS = ["vendor", "node_modules", ".git"]
 
@@ -50,11 +51,37 @@ class CodeIndex:
         """Get relevant code snippets"""
         return self.file_snippets.get(file_path, [])
 
+def install_ollama():
+    """Install Ollama based on the OS"""
+    os_name = platform.system().lower()
+    
+    if os_name == "darwin":  # macOS
+        print("🍏 Installing Ollama on macOS...")
+        subprocess.run(["brew", "install", "ollama"], check=True)
+
+    elif os_name == "linux":
+        print("🐧 Installing Ollama on Linux...")
+        subprocess.run("curl -fsSL https://ollama.com/install.sh | bash", shell=True, check=True)
+
+    elif os_name == "windows":
+        print("🖥️ Installing Ollama on Windows...")
+        subprocess.run(["powershell", "-Command", "iwr https://ollama.com/install.ps1 -useb | iex"], check=True)
+
+    else:
+        print("❌ Unsupported OS. Please install Ollama manually from https://ollama.com")
+        exit(1)
+
+    print("✅ Ollama installed successfully!")
+
 # Ollama Check
 def check_ollama_and_setup():
     if shutil.which("ollama") is None:
-        print("\n❌ Ollama is not installed. Please install it manually.")
+        print("\n❌ Ollama not found. Installing now...")
+        install_ollama()
         exit()
+    else:
+        print("\n✅ Ollama is already installed.")
+
     subprocess.run(["ollama", "pull", OLLAMA_MODEL_NAME], check=True)
     print("\n✅ Ollama and model are ready.")
 
